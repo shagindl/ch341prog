@@ -21,7 +21,8 @@
  *
  */
 
-#include <libusb-1.0/libusb.h>
+#include <libusb/libusb.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -31,7 +32,7 @@
 #include "ch341a.h"
 
 struct libusb_device_handle *devHandle = NULL;
-struct sigaction saold;
+//struct signal saold;
 int force_stop = 0;
 
 void v_print(int mode, int len) ;
@@ -41,13 +42,64 @@ void sig_int(int signo)
 {
     force_stop = 1;
 }
+static bool already_hooked_up;
+void HookupHandler() {
+    if (already_hooked_up) {
+        perror( "LOG(FATAL) << \"Tried to hookup signal handlers more than once.\"");
+    }
+    already_hooked_up = true;
+#ifdef _WIN32
+    signal(SIGINT, sig_int);
+    signal(SIGTERM, sig_int);
+    signal(SIGABRT, sig_int);
+#else
+    struct sigaction sa;
+    // Setup the handler
+    sa.sa_handler = &sig_int;
+    // Restart the system call, if at all possible
+    sa.sa_flags = SA_RESTART;
+    // Block every signal during the handler
+    sigfillset(&sa.sa_mask);
+    // Intercept SIGHUP and SIGINT
+    if (sigaction(SIGHUP, &sa, NULL) == -1) {
+        LOG(FATAL) << "Cannot install SIGHUP handler.";
+    }
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        LOG(FATAL) << "Cannot install SIGINT handler.";
+    }
+#endif
+}
+void UnhookHandler() {
+    if (already_hooked_up) {
+        #ifdef _WIN32
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTERM, SIG_DFL);
+            signal(SIGABRT, SIG_DFL);
+        #else
+            struct sigaction sa;
+            // Setup the sighub handler
+            sa.sa_handler = SIG_DFL;
+            // Restart the system call, if at all possible
+            sa.sa_flags = SA_RESTART;
+            // Block every signal during the handler
+            sigfillset(&sa.sa_mask);
+            // Intercept SIGHUP and SIGINT
+            if (sigaction(SIGHUP, &sa, NULL) == -1) {
+                LOG(FATAL) << "Cannot uninstall SIGHUP handler.";
+            }
+            if (sigaction(SIGINT, &sa, NULL) == -1) {
+                LOG(FATAL) << "Cannot uninstall SIGINT handler.";
+            }
+        #endif
+            already_hooked_up = false;
+    }
+}
 
 /* Configure CH341A, find the device and set the default interface. */
 int32_t ch341Configure(uint16_t vid, uint16_t pid)
 {
     struct libusb_device *dev;
     int32_t ret;
-    struct sigaction sa;
 
     uint8_t  desc[0x12];
 
@@ -100,12 +152,13 @@ int32_t ch341Configure(uint16_t vid, uint16_t pid)
     }
 
     printf("Device reported its revision [%d.%02d]\n", desc[12], desc[13]);
-    sa.sa_handler = &sig_int;
-    sa.sa_flags = SA_RESTART;
-    sigfillset(&sa.sa_mask);
-    if (sigaction(SIGINT, &sa, &saold) == -1) {
-        perror("Error: cannot handle SIGINT"); // Should not happen
-    }
+    HookupHandler();
+    //sa.sa_handler = &sig_int;
+    //sa.sa_flags = SA_RESTART;
+    //sigfillset(&sa.sa_mask);
+    //if (sigaction(SIGINT, &sa, &saold) == -1) {
+    //    perror("Error: cannot handle SIGINT"); // Should not happen
+    //}
     return 0;
 release_interface:
     libusb_release_interface(devHandle, 0);
@@ -123,7 +176,8 @@ int32_t ch341Release(void)
     libusb_close(devHandle);
     libusb_exit(NULL);
     devHandle = NULL;
-    sigaction(SIGINT, &saold, NULL);
+    UnhookHandler();
+    //sigaction(SIGINT, &saold, NULL);
     return 0;
 }
 
@@ -352,7 +406,7 @@ int32_t ch341EraseChip(void)
 }
 
 /* callback for bulk out async transfer */
-void cbBulkOut(struct libusb_transfer *transfer)
+void LIBUSB_CALL cbBulkOut(struct libusb_transfer *transfer)
 {
     if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
         fprintf(stderr, "\ncbBulkOut: error : %d\n", transfer->status);
@@ -366,7 +420,7 @@ struct spi_transfer_in {
 };
 
 /* callback for bulk in async transfer */
-void cbBulkIn(struct libusb_transfer *transfer)
+void LIBUSB_CALL cbBulkIn(struct libusb_transfer *transfer)
 {
     struct spi_transfer_in *tf = transfer->user_data;
     switch(transfer->status) {
@@ -405,7 +459,7 @@ int32_t ch341SpiRead(uint8_t *buf, uint32_t add, uint32_t len)
     uint32_t ret;
     int32_t old_counter;
     struct timeval tv = {0, 100};
-    struct spi_transfer_in bulk_in = {};
+    struct spi_transfer_in bulk_in = {0};
 
     v_print( 0, len); // verbose
 

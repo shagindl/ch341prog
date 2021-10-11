@@ -24,7 +24,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <synchapi.h>
+//#include <unistd.h>
+#include <io.h>
 #include <string.h>
 #include <getopt.h>
 #include "ch341a.h"
@@ -71,9 +73,9 @@ void v_print(int mode, int len) { // mode: begin=0, progress = 1
 int main(int argc, char* argv[])
 {
     int32_t ret;
-    uint8_t *buf;
+    uint8_t *buf = NULL;
     FILE *fp;
-    char *filename;
+    char *filename = "";
     int cap;
     int length = 0;
     char op = 0;
@@ -176,7 +178,7 @@ int main(int argc, char* argv[])
         ret = ch341EraseChip();
         if (ret < 0) goto out;
         do {
-            sleep(1);
+            Sleep(1);
             ret = ch341ReadStatus();
             if (ret < 0) goto out;
             printf(".");

@@ -1,0 +1,6 @@
+[submodule "CH341-Store"]
+	path = CH341-Store
+	url = https://github.com/boseji/CH341-Store.git
+[submodule "libusb"]
+	path = libusb
+	url = https://github.com/libusb/libusb.git
