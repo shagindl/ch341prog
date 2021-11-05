@@ -1,0 +1,55 @@
+//--------------------------------------
+//--- 010 Editor v6.0.1 Binary Template
+//
+// File:
+// Author:
+// Revision:
+// Purpose:
+//--------------------------------------
+typedef unsigned char      uint8_t;
+typedef unsigned short     uint16_t;
+typedef unsigned long      uint32_t;
+typedef signed char        int8_t;
+typedef signed short       int16_t;
+typedef signed long        int32_t;
+
+
+enum <uint8_t> PUSEQ_t {OutDisable = 0, VoutN_Ramp = 1, VoutP_Ramp, BothRamp = 3  };
+enum <uint8_t> IRMP_t {I1uA = 0, I2uA = 1, I4uA, I8uA = 3  };
+
+struct REG2_t{
+    PUSEQ_t PUSEQ : 2;
+    uint8_t PDIS : 1;
+    IRMP_t IRMP : 2 <comment=IRMP2S>;
+    uint8_t Vplus : 1;
+    uint8_t LOCK : 1;
+    uint8_t rsrv : 1;
+};
+
+struct LT3582_t{
+    uint8_t VP <comment=Vp2S>;
+    uint8_t VN <comment=Vn2S>;
+    REG2_t REG2;
+};
+LT3582_t LT3582_mem;
+
+string Vp2S(uint8_t &Vp){
+    string s;
+    SPrintf(s, "Vp = %.1f V", 3.2 + (float)Vp  * 0.05 + LT3582_mem.REG2.Vplus*0.025);
+    return s;
+}
+string Vn2S(uint8_t &Vn){
+    string s;
+    SPrintf(s, "Vp = %.1f V", -1.2 - (float)Vn  * 0.05);
+    return s;
+}
+string IRMP2S(IRMP_t &I){
+    switch(I){
+    case 0: return "Iramp = 1 uA";
+    case 1: return "Iramp = 2 uA";
+    case 2: return "Iramp = 4 uA";
+    case 3: return "Iramp = 8 uA";
+    }
+
+    return "Iramp = ?";
+}

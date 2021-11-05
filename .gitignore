@@ -6,3 +6,13 @@ ch341prog
 /debian/debhelper-build-stamp
 /debian/files
 /tmp
+*.pdb
+Debug
+*.user
+db
+greybox_tmp
+incremental_db
+output_files
+/utils/SignalTap/V01/*.jdi
+/utils/SignalTap/V01/*.txt
+*.bak
