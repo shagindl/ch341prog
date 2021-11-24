@@ -21,138 +21,63 @@
  *
  */
 
-#include <libusb-1.0/libusb.h>
+#include <windows.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <signal.h>
+#include "Helper.h"
 #include "ch341a.h"
+#include "CH341.api/EXAM.h"
+#include "prg_error.h"
 
-struct libusb_device_handle *devHandle = NULL;
-struct sigaction saold;
+//struct signal saold;
 int force_stop = 0;
-
 void v_print(int mode, int len) ;
 
-/* SIGINT handler */
-void sig_int(int signo)
-{
-    force_stop = 1;
-}
+ULONG ch341_sn = 0;
+HANDLE	WINAPI device_handle = INVALID_HANDLE_VALUE;
 
 /* Configure CH341A, find the device and set the default interface. */
-int32_t ch341Configure(uint16_t vid, uint16_t pid)
+void CALLBACK CH341_NOTIFY_ROUTINE(ULONG iEventStatus);
+int32_t ch341Configure()
 {
-    struct libusb_device *dev;
-    int32_t ret;
-    struct sigaction sa;
-
-    uint8_t  desc[0x12];
-
-    if (devHandle != NULL) {
-        fprintf(stderr, "Call ch341Release before re-configure\n");
+    if ((device_handle = CH341OpenDevice(ch341_sn)) == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "Couldn't open device CH341.\n");
         return -1;
     }
-    ret = libusb_init(NULL);
-    if(ret < 0) {
-        fprintf(stderr, "Couldn't initialise libusb\n");
-        return -1;
+    fprintf(stderr, "CH341GetVerIC = %s.\n", ToString((IC_VER_t)CH341GetVerIC(0)).c_str());
+    if (!CH341SetParaMode(ch341_sn, mCH341_PARA_MODE_EPP)) {
+        std::cout << "Error CH341SetParaMode.\n";
+        goto close_handle;
     }
-
-    #if LIBUSB_API_VERSION < 0x01000106
-        libusb_set_debug(NULL, 3);
-    #else
-        libusb_set_option(NULL, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_INFO);
-    #endif
-
-    if(!(devHandle = libusb_open_device_with_vid_pid(NULL, vid, pid))) {
-        fprintf(stderr, "Couldn't open device [%04x:%04x].\n", vid, pid);
-        return -1;
-    }
-
-    if(!(dev = libusb_get_device(devHandle))) {
-        fprintf(stderr, "Couldn't get bus number and address.\n");
+    if (!CH341SetDeviceNotify(ch341_sn, NULL, CH341_NOTIFY_ROUTINE)) {
+        std::cout << "Error CH341SetDeviceNotify.\n";
         goto close_handle;
     }
 
-    if(libusb_kernel_driver_active(devHandle, 0)) {
-        ret = libusb_detach_kernel_driver(devHandle, 0);
-        if(ret) {
-            fprintf(stderr, "Failed to detach kernel driver: '%s'\n", strerror(-ret));
-            goto close_handle;
-        }
-    }
-
-    ret = libusb_claim_interface(devHandle, 0);
-
-    if(ret) {
-        fprintf(stderr, "Failed to claim interface 0: '%s'\n", strerror(-ret));
-        goto close_handle;
-    }
-
-    ret = libusb_get_descriptor(devHandle, LIBUSB_DT_DEVICE, 0x00, desc, 0x12);
-
-    if(ret < 0) {
-        fprintf(stderr, "Failed to get device descriptor: '%s'\n", strerror(-ret));
-        goto release_interface;
-    }
-
-    printf("Device reported its revision [%d.%02d]\n", desc[12], desc[13]);
-    sa.sa_handler = &sig_int;
-    sa.sa_flags = SA_RESTART;
-    sigfillset(&sa.sa_mask);
-    if (sigaction(SIGINT, &sa, &saold) == -1) {
-        perror("Error: cannot handle SIGINT"); // Should not happen
-    }
     return 0;
-release_interface:
-    libusb_release_interface(devHandle, 0);
+
 close_handle:
-    libusb_close(devHandle);
-    devHandle = NULL;
+    CH341CloseDevice(ch341_sn);
+
     return -1;
 }
 
 /* release libusb structure and ready to exit */
 int32_t ch341Release(void)
 {
-    if (devHandle == NULL) return -1;
-    libusb_release_interface(devHandle, 0);
-    libusb_close(devHandle);
-    libusb_exit(NULL);
-    devHandle = NULL;
-    sigaction(SIGINT, &saold, NULL);
-    return 0;
-}
+    CH341CloseDevice(ch341_sn);
+    device_handle = INVALID_HANDLE_VALUE;
 
-/* Helper function for libusb_bulk_transfer, display error message with the caller name */
-int32_t usbTransfer(const char * func, uint8_t type, uint8_t* buf, int len)
-{
-    int32_t ret;
-    int transfered;
-    if (devHandle == NULL) return -1;
-    ret = libusb_bulk_transfer(devHandle, type, buf, len, &transfered, DEFAULT_TIMEOUT);
-    if (ret < 0) {
-        fprintf(stderr, "%s: Failed to %s %d bytes '%s'\n", func,
-                (type == BULK_WRITE_ENDPOINT) ? "write" : "read", len, libusb_error_name(ret));
-        return -1;
-    }
-    return transfered;
+    return 0;
 }
 
 /*   set the i2c bus speed (speed(b1b0): 0 = 20kHz; 1 = 100kHz, 2 = 400kHz, 3 = 750kHz)
  *   set the spi bus data width(speed(b2): 0 = Single, 1 = Double)  */
 int32_t ch341SetStream(uint32_t speed) {
-    uint8_t buf[3];
-
-    if (devHandle == NULL) return -1;
-    buf[0] = CH341A_CMD_I2C_STREAM;
-    buf[1] = CH341A_CMD_I2C_STM_SET | (speed & 0x7);
-    buf[2] = CH341A_CMD_I2C_STM_END;
-
-    return usbTransfer(__func__, BULK_WRITE_ENDPOINT, buf, 3);
+   return !CH341SetStream(ch341_sn, speed);
 }
 
 /* ch341 requres LSB first, swap the bit order before send and after receive  */
@@ -163,9 +88,6 @@ uint8_t swapByte(uint8_t c)
         0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
         0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
         0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8,
-        0x04, 0x84, 0x44, 0xc4, 0x24, 0xa4, 0x64, 0xe4,
-        0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
-        0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec,
         0x1c, 0x9c, 0x5c, 0xdc, 0x3c, 0xbc, 0x7c, 0xfc,
         0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2,
         0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2,
@@ -198,20 +120,16 @@ uint8_t swapByte(uint8_t c)
 /* assert or deassert the chip-select pin of the spi device */
 void ch341SpiCs(uint8_t *ptr, bool selected)
 {
-    *ptr++ = CH341A_CMD_UIO_STREAM;
-    *ptr++ = CH341A_CMD_UIO_STM_OUT | (selected ? 0x36 : 0x37);
-    if (selected)
-        *ptr++ = CH341A_CMD_UIO_STM_DIR | 0x3F; // pin direction
-    *ptr++ = CH341A_CMD_UIO_STM_END;
+    // @TODO:
 }
 
 /* transfer len bytes of data to the spi device */
 int32_t ch341SpiStream(uint8_t *out, uint8_t *in, uint32_t len)
 {
     uint8_t inBuf[CH341_PACKET_LENGTH], outBuf[CH341_PACKET_LENGTH], *inPtr, *outPtr;
-    int32_t ret, packetLen;
+    int32_t ret = 0, packetLen;
     bool done;
-
+#if 0
     if (devHandle == NULL) return -1;
 
     ch341SpiCs(outBuf, true);
@@ -244,6 +162,7 @@ int32_t ch341SpiStream(uint8_t *out, uint8_t *in, uint32_t len)
     ch341SpiCs(outBuf, false);
     ret = usbTransfer(__func__, BULK_WRITE_ENDPOINT, outBuf, 3);
     if (ret < 0) return -1;
+#endif
     return 0;
 }
 
@@ -252,9 +171,9 @@ int32_t ch341SpiStream(uint8_t *out, uint8_t *in, uint32_t len)
 int32_t ch341SpiCapacity(void)
 {
     uint8_t out[JEDEC_ID_LEN];
-    uint8_t in[JEDEC_ID_LEN], *ptr, cap;
+    uint8_t in[JEDEC_ID_LEN], *ptr, cap = 0;
     int32_t ret;
-
+#if 0
     if (devHandle == NULL)
         return -1;
 
@@ -292,7 +211,7 @@ int32_t ch341SpiCapacity(void)
         printf("Chip not found or missed in ch341a. Check connection\n");
         exit(0);
     }
-
+#endif
     return cap;
 }
 
@@ -300,13 +219,13 @@ int32_t ch341SpiCapacity(void)
 int32_t ch341ReadStatus(void)
 {
     uint8_t out[2];
-    uint8_t in[2];
+    uint8_t in[2] = {0};
     int32_t ret;
 
-    if (devHandle == NULL) return -1;
-    out[0] = 0x05; // Read status
-    ret = ch341SpiStream(out, in, 2);
-    if (ret < 0) return ret;
+    //if (devHandle == NULL) return -1;
+    //out[0] = 0x05; // Read status
+    //ret = ch341SpiStream(out, in, 2);
+    //if (ret < 0) return ret;
     return (in[1]);
 }
 
@@ -316,7 +235,7 @@ int32_t ch341WriteStatus(uint8_t status)
     uint8_t out[2];
     uint8_t in[2];
     int32_t ret;
-
+#if 0
     if (devHandle == NULL) return -1;
     out[0] = 0x06; // Write enable
     ret = ch341SpiStream(out, in, 1);
@@ -328,6 +247,7 @@ int32_t ch341WriteStatus(uint8_t status)
     out[0] = 0x04; // Write disable
     ret = ch341SpiStream(out, in, 1);
     if (ret < 0) return ret;
+#endif
     return 0;
 }
 
@@ -337,7 +257,7 @@ int32_t ch341EraseChip(void)
     uint8_t out[1];
     uint8_t in[1];
     int32_t ret;
-
+#if 0
     if (devHandle == NULL) return -1;
     out[0] = 0x06; // Write enable
     ret = ch341SpiStream(out, in, 1);
@@ -348,52 +268,18 @@ int32_t ch341EraseChip(void)
     out[0] = 0x04; // Write disable
     ret = ch341SpiStream(out, in, 1);
     if (ret < 0) return ret;
+#endif
     return 0;
 }
 
-/* callback for bulk out async transfer */
-void cbBulkOut(struct libusb_transfer *transfer)
-{
-    if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
-        fprintf(stderr, "\ncbBulkOut: error : %d\n", transfer->status);
-    }
-}
-
-struct spi_transfer_in {
-    ssize_t bulk_count;
-    size_t skip_bytes;
-    uint8_t *read_buffer;
-};
-
-/* callback for bulk in async transfer */
-void cbBulkIn(struct libusb_transfer *transfer)
-{
-    struct spi_transfer_in *tf = transfer->user_data;
-    switch(transfer->status) {
-        case LIBUSB_TRANSFER_COMPLETED:
-            /* the first package has cmd and address info, so discard 4 bytes */
-            if (tf->read_buffer != NULL) {
-                int i = tf->bulk_count? 0: tf->skip_bytes;
-                for(; i < transfer->actual_length; ++i) {
-                    *tf->read_buffer++ = swapByte(transfer->buffer[i]);
-                }
-            }
-            tf->bulk_count++;
-            break;
-        default:
-            fprintf(stderr, "\ncbBulkIn: error : %d\n", transfer->status);
-            tf->bulk_count = -1;
-    }
-    return;
-}
-
 /* read the content of SPI device to buf, make sure the buf is big enough before call  */
-int32_t ch341SpiRead(uint8_t *buf, uint32_t add, uint32_t len)
+int32_t ch341_api_spi::Read(uint8_t *buf, uint32_t add, uint32_t len)
 {
+    uint32_t ret = 0;
     uint8_t out[CH341_MAX_PACKET_LEN];
     uint8_t in[CH341_PACKET_LENGTH];
     bool fourbyte = (add + len) > (1 << 24);
-
+#if 0
     if (devHandle == NULL) return -1;
     /* what subtracted is: 1. first cs package, 2. leading command for every other packages,
      * 3. second package contains read flash command and 3 bytes address */
@@ -402,10 +288,9 @@ int32_t ch341SpiRead(uint8_t *buf, uint32_t add, uint32_t len)
     uint32_t pkg_len, pkg_count;
     struct libusb_transfer *xferBulkIn, *xferBulkOut;
     uint32_t idx = 0;
-    uint32_t ret;
     int32_t old_counter;
     struct timeval tv = {0, 100};
-    struct spi_transfer_in bulk_in = {};
+    struct spi_transfer_in bulk_in = {0};
 
     v_print( 0, len); // verbose
 
@@ -476,19 +361,21 @@ int32_t ch341SpiRead(uint8_t *buf, uint32_t add, uint32_t len)
     libusb_free_transfer(xferBulkIn);
     libusb_free_transfer(xferBulkOut);
     v_print(2, 0);
+#endif
     return ret;
 }
 
 #define WRITE_PAYLOAD_LENGTH 301 // 301 is the length of a page(256)'s data with protocol overhead
 /* write buffer(*buf) to SPI flash */
-int32_t ch341SpiWrite(uint8_t *buf, uint32_t add, uint32_t len)
+int32_t ch341_api_spi::Write(uint8_t *buf, uint32_t add, uint32_t len)
 {
     uint8_t out[WRITE_PAYLOAD_LENGTH];
     uint8_t in[CH341_PACKET_LENGTH];
     uint32_t tmp, pkg_count;
     struct libusb_transfer *xferBulkIn, *xferBulkOut;
     uint32_t idx = 0;
-    uint32_t ret;
+    uint32_t ret = 0;
+#if 0
     int32_t old_counter;
     struct timeval tv = {0, 100};
     bool fourbyte = (add + len) > (1 << 24);
@@ -576,5 +463,65 @@ int32_t ch341SpiWrite(uint8_t *buf, uint32_t add, uint32_t len)
     libusb_free_transfer(xferBulkOut);
 
     v_print(2, 0);
+#endif
     return ret;
+}
+//-----------------------------------------------------------------------------
+// -- ch341_api_i2c
+//-----------------------------------------------------------------------------
+[[nodiscard]] int32_t ch341_api_i2c::Read(uint8_t* buf, uint32_t DataAddr, uint32_t len) {
+    int32_t ret = 0;
+
+    std::list<std::vector<uint8_t>> out_scenario = { 
+        {
+            (uint8_t)((_DevAddr << 1) | 0x00), // Write
+            /*(uint8_t)(DataAddr >> 8),*/ (uint8_t)(DataAddr >> 0),
+        },
+        {
+            (uint8_t)((_DevAddr << 1) | 0x01), // Read
+        }
+    };
+    for (auto& out : out_scenario) {
+        if (!IIC_IssueStart(ch341_sn)) Excp();
+        for (auto& dt : out) if (!IIC_OutByteCheckAck(ch341_sn, dt)) Excp("dt = 0x%02X", dt);
+    }
+    for (int i = 0; i < len - 1; i++) {
+        if(!IIC_InBlockByAck(ch341_sn, 1, &buf[i]) ) Excp("Error read buf[%d]", i);
+    }
+    if (len && !IIC_InByteNoAck(ch341_sn, &buf[len - 1]) ) Excp("Error read buf[%d]", len - 1);
+    if (!IIC_IssueStop(ch341_sn)) Excp();
+
+    return 0;
+}
+[[nodiscard]] int32_t ch341_api_i2c::Write(uint8_t* buf, uint32_t DataAddr, uint32_t len) {
+    int32_t ret = 0;
+
+    std::vector<uint8_t> out = {
+        (uint8_t)((_DevAddr << 1) | 0x00), // Write
+        /*(uint8_t)(DataAddr >> 8),*/ (uint8_t)(DataAddr >> 0),
+    };
+    for (auto i = 0; i < len; i++) {
+        if (!IIC_IssueStart(ch341_sn)) Excp();
+        for (auto& dt : out) if (!IIC_OutByteCheckAck(ch341_sn, dt)) Excp("dt = 0x%02X", dt);
+        if (!IIC_OutByteCheckAck(ch341_sn, buf[i])) Excp("dt = 0x%02X", buf[i]);
+        if (!IIC_IssueStop(ch341_sn)) Excp();
+    }
+
+    return 0;
+}
+//-----------------------------------------------------------------------------
+// -- Event
+//-----------------------------------------------------------------------------
+// Device event notification callback program
+void CALLBACK CH341_NOTIFY_ROUTINE(ULONG iEventStatus) {
+    if (iEventStatus == CH341_DEVICE_ARRIVAL) { // Device insertion event, already inserted
+        if (CH341OpenDevice(ch341_sn)) {
+            std::cout <<  "CH341EVT **The device is unplugged.\n";
+        } else {
+            std::cout << "CH341EVT **Device is plugged in.\n";
+            CH341SetParaMode(ch341_sn, mCH341_PARA_MODE_EPP);
+        }
+    } else if (iEventStatus == CH341_DEVICE_REMOVE) { // Device unplug event, unplugged
+        std::cout << "CH341EVT **The device is unplugged.\n";
+    }
 }

@@ -17,12 +17,8 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
  */
-#ifndef __CH341_H__
-#define __CH341_H__
+#pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 #define     DEFAULT_TIMEOUT        1000     // 1000mS for USB timeouts
 #define     BULK_WRITE_ENDPOINT    0x02
 #define     BULK_READ_ENDPOINT     0x82
@@ -64,12 +60,10 @@ extern "C" {
 #define     CH341A_STM_I2C_750K    0x03
 #define     CH341A_STM_SPI_DBL     0x04
 
-int32_t usbTransfer(const char * func, uint8_t type, uint8_t* buf, int len);
-int32_t ch341Configure(uint16_t vid, uint16_t pid);
+int32_t ch341Configure();
 int32_t ch341SetStream(uint32_t speed);
 int32_t ch341SpiStream(uint8_t *out, uint8_t *in, uint32_t len);
 int32_t ch341SpiCapacity(void);
-int32_t ch341SpiRead(uint8_t *buf, uint32_t add, uint32_t len);
 int32_t ch341ReadStatus(void);
 int32_t ch341WriteStatus(uint8_t status);
 int32_t ch341EraseChip(void);
@@ -77,8 +71,26 @@ int32_t ch341SpiWrite(uint8_t *buf, uint32_t add, uint32_t len);
 int32_t ch341Release(void);
 uint8_t swapByte(uint8_t c);
 
-#ifdef __cplusplus
-}
-#endif
+class ch341_api {
+public:
+    virtual void set_DevAddr(UCHAR DevAddr) {}
+    virtual int32_t Read(uint8_t* buf, uint32_t add, uint32_t len) = 0;
+    virtual int32_t Write(uint8_t* buf, uint32_t add, uint32_t len) = 0;
+    virtual ~ch341_api(){}
+};
 
-#endif
+class ch341_api_spi : public ch341_api {
+public:
+    int32_t Read(uint8_t* buf, uint32_t add, uint32_t len) final;
+    int32_t Write(uint8_t* buf, uint32_t add, uint32_t len) final;
+};
+class ch341_api_i2c : public ch341_api {
+    UCHAR _DevAddr = 0;
+public:
+    void set_DevAddr(UCHAR DevAddr) final {
+        _DevAddr = DevAddr;
+    }
+    virtual int32_t Read(uint8_t* buf, uint32_t DataAddr, uint32_t len) override;
+    virtual int32_t Write(uint8_t* buf, uint32_t DataAddr, uint32_t len) override;
+    virtual ~ch341_api_i2c() override {}
+};
