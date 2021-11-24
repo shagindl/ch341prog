@@ -32,7 +32,7 @@ std::map<std::string, dev_desc_t> support_device = {
     //{ "24c512", 65536 },
     //{ "24c1024", 131072},
     { "24c256_8", { {&api_i2c, "24c256_8", 1}, 0x50} },
-    { "LT3582", { {&api_LT3582, "LT3582", 3}, 0x45} },
+    { "LT3582", { {&api_LT3582, "LT3582", 3}, 0x45} },  // CA = 1 0x31; CA = 0 0x45
 };
 std::tuple<ch341_api*, std::string, int32_t> parse_device(std::string eepromname) {
     try {

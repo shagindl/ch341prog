@@ -503,7 +503,7 @@ int32_t ch341_api_spi::Write(uint8_t *buf, uint32_t add, uint32_t len)
     for (auto i = 0; i < len; i++) {
         if (!IIC_IssueStart(ch341_sn)) Excp();
         for (auto& dt : out) if (!IIC_OutByteCheckAck(ch341_sn, dt)) Excp("dt = 0x%02X", dt);
-        if (!IIC_OutByteCheckAck(ch341_sn, buf[i])) Excp("dt = 0x%02X", dt);
+        if (!IIC_OutByteCheckAck(ch341_sn, buf[i])) Excp("dt = 0x%02X", buf[i]);
         if (!IIC_IssueStop(ch341_sn)) Excp();
     }
 

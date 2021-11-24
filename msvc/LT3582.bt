@@ -18,12 +18,12 @@ enum <uint8_t> PUSEQ_t {OutDisable = 0, VoutN_Ramp = 1, VoutP_Ramp, BothRamp = 3
 enum <uint8_t> IRMP_t {I1uA = 0, I2uA = 1, I4uA, I8uA = 3  };
 
 struct REG2_t{
-    PUSEQ_t PUSEQ : 2;
-    uint8_t PDIS : 1;
-    IRMP_t IRMP : 2 <comment=IRMP2S>;
-    uint8_t Vplus : 1;
-    uint8_t LOCK : 1;
     uint8_t rsrv : 1;
+    uint8_t LOCK : 1;
+    uint8_t Vplus : 1;
+    IRMP_t IRMP : 2 <comment=IRMP2S>;
+    uint8_t PDIS : 1;
+    PUSEQ_t PUSEQ : 2;
 };
 
 struct LT3582_t{

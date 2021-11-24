@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <string>
 
-#define ENABLE_EXCEPTION    0
+#define ENABLE_EXCEPTION    1
 
 #if ENABLE_EXCEPTION == 1
     #define Excp(...) throw prg_error_t (std::string(__FILE__), __func__, __LINE__, __VA_ARGS__)

@@ -1,0 +1,1 @@
+ch341prog.exe -v -s LT3582 -w LT3582_12.bin
